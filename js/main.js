@@ -1,239 +1,185 @@
-'use strict';
 
-var startButton = document.getElementById('startButton');
-var callButton = document.getElementById('callButton');
-var hangupButton = document.getElementById('hangupButton');
-callButton.disabled = true;
-hangupButton.disabled = true;
-startButton.onclick = start;
-callButton.onclick = call;
-hangupButton.onclick = hangup;
 
-var startTime;
-var localVideo = document.getElementById('localVideo');
-var remoteVideo = document.getElementById('remoteVideo');
-
-localVideo.addEventListener('loadedmetadata', function() {
-  trace('Local video videoWidth: ' + this.videoWidth +
-    'px,  videoHeight: ' + this.videoHeight + 'px');
-});
-
-remoteVideo.addEventListener('loadedmetadata', function() {
-  trace('Remote video videoWidth: ' + this.videoWidth +
-    'px,  videoHeight: ' + this.videoHeight + 'px');
-});
-
-remoteVideo.onresize = function() {
-  trace('Remote video size changed to ' +
-    remoteVideo.videoWidth + 'x' + remoteVideo.videoHeight);
-  // We'll use the first onresize callback as an indication that video has started
-  // playing out.
-  if (startTime) {
-    var elapsedTime = window.performance.now() - startTime;
-    trace('Setup time: ' + elapsedTime.toFixed(3) + 'ms');
-    startTime = null;
-  }
-};
-
+var socket = io();
+var RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection || window.msRTCPeerConnection;
+var RTCSessionDescription = window.RTCSessionDescription || window.mozRTCSessionDescription || window.webkitRTCSessionDescription || window.msRTCSessionDescription;
+navigator.getUserMedia = navigator.getUserMedia || navigator.mozGetUserMedia || navigator.webkitGetUserMedia || navigator.msGetUserMedia;
+var twilioIceServers = [
+     { url: 'stun:global.stun.twilio.com:3478?transport=udp' }
+     // { url: 'turn:global.turn.twilio.com:3478?transport=udp',
+     //   username: 'ea757ad2c42b932c7f2abe480295e7eb039dc2b13b78c86bc412818ed51e5eea',
+     //   credential: 'MPnnojPRoPDI+B3kLONGF9P440Lb8NkrTq+FxxJBVro=' },
+     // { url: 'turn:global.turn.twilio.com:3478?transport=tcp',
+     //   username: 'ea757ad2c42b932c7f2abe480295e7eb039dc2b13b78c86bc412818ed51e5eea',
+     //   credential: 'MPnnojPRoPDI+B3kLONGF9P440Lb8NkrTq+FxxJBVro=' },
+     // { url: 'turn:global.turn.twilio.com:443?transport=tcp',
+     //   username: 'ea757ad2c42b932c7f2abe480295e7eb039dc2b13b78c86bc412818ed51e5eea',
+     //   credential: 'MPnnojPRoPDI+B3kLONGF9P440Lb8NkrTq+FxxJBVro=' }
+];
+var configuration = {"iceServers": [{"url": "stun:stun.l.google.com:19302"}]};
+// configuration.iceServers = twilioIceServers;
+var pcPeers = {};
+var currentUsername = document.getElementById("currentUsername");
+var roomName = document.getElementById("roomName");
+var selfView = document.getElementById("selfView");
+var remoteViewContainer = document.getElementById("remoteViewContainer");
+var clientId = '';
 var localStream;
-var pc1;
-var pc2;
-var offerOptions = {
-  offerToReceiveAudio: 1,
-  offerToReceiveVideo: 1
-};
-
-function getName(pc) {
-  return (pc === pc1) ? 'pc1' : 'pc2';
+function getLocalStream() {
+  navigator.getUserMedia({ "audio": true, "video": true }, function (stream) {
+    localStream = stream;
+    selfView.src = URL.createObjectURL(stream);
+    selfView.muted = true;
+  }, logError);
 }
-
-function getOtherPc(pc) {
-  return (pc === pc1) ? pc2 : pc1;
-}
-
-function gotStream(stream) {
-  trace('Received local stream');
-  localVideo.srcObject = stream;
-  // Add localStream to global scope so it's accessible from the browser console
-  window.localStream = localStream = stream;
-  callButton.disabled = false;
-}
-
-function start() {
-  trace('Requesting local stream');
-  startButton.disabled = true;
-  navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: true
-  })
-  .then(gotStream)
-  .catch(function(e) {
-    alert('getUserMedia() error: ' + e.name);
+function join(roomID) {
+  socket.emit('join', {'roomID': roomID, 'userName': 'GOD', 'from': socket.io.engine.id }, function(socketIds){
+    console.log('join', socketIds);
+    console.log('join', roomID);
+    roomName.innerHTML = 'Chat Room: ' + roomID;
+    for (var i in socketIds) {
+      var socketId = socketIds[i];
+      createPC(socketId, true);
+    }
   });
 }
-
-function call() {
-  callButton.disabled = true;
-  hangupButton.disabled = false;
-  trace('Starting call');
-  startTime = window.performance.now();
-  var videoTracks = localStream.getVideoTracks();
-  var audioTracks = localStream.getAudioTracks();
-  if (videoTracks.length > 0) {
-    trace('Using video device: ' + videoTracks[0].label);
-  }
-  if (audioTracks.length > 0) {
-    trace('Using audio device: ' + audioTracks[0].label);
-  }
-  var servers = null;
-  // Add pc1 to global scope so it's accessible from the browser console
-  window.pc1 = pc1 = new RTCPeerConnection(servers);
-  trace('Created local peer connection object pc1');
-  pc1.onicecandidate = function(e) {
-    onIceCandidate(pc1, e);
+function createPC(socketId, isOffer) {
+  var pc = new RTCPeerConnection(configuration);
+  pcPeers[socketId] = pc;
+  pc.onicecandidate = function (event) {
+    console.log('onicecandidate', event);
+    if (event.candidate) {
+      socket.emit('exchange', {'to': socketId, 'candidate': event.candidate });
+    }
   };
-  // Add pc2 to global scope so it's accessible from the browser console
-  window.pc2 = pc2 = new RTCPeerConnection(servers);
-  trace('Created remote peer connection object pc2');
-  pc2.onicecandidate = function(e) {
-    onIceCandidate(pc2, e);
-  };
-  pc1.oniceconnectionstatechange = function(e) {
-    onIceStateChange(pc1, e);
-  };
-  pc2.oniceconnectionstatechange = function(e) {
-    onIceStateChange(pc2, e);
-  };
-  pc2.onaddstream = gotRemoteStream;
-
-  pc1.addStream(localStream);
-  trace('Added local stream to pc1');
-
-  trace('pc1 createOffer start');
-  pc1.createOffer(
-    offerOptions
-  ).then(
-    onCreateOfferSuccess,
-    onCreateSessionDescriptionError
-  );
-}
-
-function onCreateSessionDescriptionError(error) {
-  trace('Failed to create session description: ' + error.toString());
-}
-
-function onCreateOfferSuccess(desc) {
-  trace('Offer from pc1\n' + desc.sdp);
-  trace('pc1 setLocalDescription start');
-  pc1.setLocalDescription(desc).then(
-    function() {
-      onSetLocalSuccess(pc1);
-    },
-    onSetSessionDescriptionError
-  );
-  trace('pc2 setRemoteDescription start');
-  pc2.setRemoteDescription(desc).then(
-    function() {
-      onSetRemoteSuccess(pc2);
-    },
-    onSetSessionDescriptionError
-  );
-  trace('pc2 createAnswer start');
-  // Since the 'remote' side has no media stream we need
-  // to pass in the right constraints in order for it to
-  // accept the incoming offer of audio and video.
-  pc2.createAnswer().then(
-    onCreateAnswerSuccess,
-    onCreateSessionDescriptionError
-  );
-}
-
-function onSetLocalSuccess(pc) {
-  trace(getName(pc) + ' setLocalDescription complete');
-}
-
-function onSetRemoteSuccess(pc) {
-  trace(getName(pc) + ' setRemoteDescription complete');
-}
-
-function onSetSessionDescriptionError(error) {
-  trace('Failed to set session description: ' + error.toString());
-}
-
-function gotRemoteStream(e) {
-  // Add remoteStream to global scope so it's accessible from the browser console
-  window.remoteStream = remoteVideo.srcObject = e.stream;
-  trace('pc2 received remote stream');
-}
-
-function onCreateAnswerSuccess(desc) {
-  trace('Answer from pc2:\n' + desc.sdp);
-  trace('pc2 setLocalDescription start');
-  pc2.setLocalDescription(desc).then(
-    function() {
-      onSetLocalSuccess(pc2);
-    },
-    onSetSessionDescriptionError
-  );
-  trace('pc1 setRemoteDescription start');
-  pc1.setRemoteDescription(desc).then(
-    function() {
-      onSetRemoteSuccess(pc1);
-    },
-    onSetSessionDescriptionError
-  );
-}
-
-function onIceCandidate(pc, event) {
-  if (event.candidate) {
-    getOtherPc(pc).addIceCandidate(
-      new RTCIceCandidate(event.candidate)
-    ).then(
-      function() {
-        onAddIceCandidateSuccess(pc);
-      },
-      function(err) {
-        onAddIceCandidateError(pc, err);
-      }
-    );
-    trace(getName(pc) + ' ICE candidate: \n' + event.candidate.candidate);
+  function createOffer() {
+    pc.createOffer(function(desc) {
+      console.log('createOffer', desc);
+      pc.setLocalDescription(desc, function () {
+        console.log('setLocalDescription', pc.localDescription);
+        socket.emit('exchange', {'to': socketId, 'sdp': pc.localDescription });
+      }, logError);
+    }, logError);
   }
-}
-
-function onAddIceCandidateSuccess(pc) {
-  trace(getName(pc) + ' addIceCandidate success');
-}
-
-function onAddIceCandidateError(pc, error) {
-  trace(getName(pc) + ' failed to add ICE Candidate: ' + error.toString());
-}
-
-function onIceStateChange(pc, event) {
-  if (pc) {
-    trace(getName(pc) + ' ICE state: ' + pc.iceConnectionState);
-    console.log('ICE state change event: ', event);
+  pc.onnegotiationneeded = function () {
+    console.log('onnegotiationneeded');
+    if (isOffer) {
+      createOffer();
+    }
   }
-}
-
-function hangup() {
-  trace('Ending call');
-  pc1.close();
-  pc2.close();
-  pc1 = null;
-  pc2 = null;
-  hangupButton.disabled = true;
-  callButton.disabled = false;
-}
-
-
-function trace(text) {
-  if (text[text.length - 1] === '\n') {
-    text = text.substring(0, text.length - 1);
+  pc.oniceconnectionstatechange = function(event) {
+    console.log('oniceconnectionstatechange', event);
+    if (event.target.iceConnectionState === 'connected') {
+      createDataChannel();
+    }
+  };
+  pc.onsignalingstatechange = function(event) {
+    console.log('onsignalingstatechange', event);
+  };
+  pc.onaddstream = function (event) {
+    console.log('onaddstream', event);
+    var element = document.createElement('video');
+    element.id = "remoteView" + socketId;
+    element.autoplay = 'autoplay';
+    element.src = URL.createObjectURL(event.stream);
+    remoteViewContainer.appendChild(element);
+    $('ul#user_list').append(( "<li><a href='#" + socketId +  "' id='" + socketId + "'>"+ socketId + "</a></li>" ));
+  };
+  pc.addStream(localStream);
+  function createDataChannel() {
+    if (pc.textDataChannel) {
+      return;
+    }
+    var dataChannel = pc.createDataChannel("text");
+    dataChannel.onerror = function (error) {
+      console.log("dataChannel.onerror", error);
+    };
+    dataChannel.onmessage = function (event) {
+      console.log("dataChannel.onmessage:", event.data);
+      var content = document.getElementById('textRoomContent');
+      content.value = content.value + socketId + ': ' + event.data + '\n';
+    };
+    dataChannel.onopen = function () {
+      var textRoom = document.getElementById('textRoom');
+      textRoom.style.display = "block";
+    };
+    dataChannel.onclose = function () {
+      console.log("dataChannel.onclose " + socketId);
+      var element = document.getElementById(socketId);
+      element.remove();
+    };
+    pc.textDataChannel = dataChannel;
   }
-  if (window.performance) {
-    var now = (window.performance.now() / 1000).toFixed(3);
-    console.log(now + ': ' + text);
+  return pc;
+}
+function exchange(data) {
+  var fromId = data.from;
+  var pc;
+  if (fromId in pcPeers) {
+    pc = pcPeers[fromId];
   } else {
-    console.log(text);
+    pc = createPC(fromId, false);
+  }
+  if (data.sdp) {
+    console.log('exchange sdp', data);
+    pc.setRemoteDescription(new RTCSessionDescription(data.sdp), function () {
+      if (pc.remoteDescription.type == "offer")
+        pc.createAnswer(function(desc) {
+          console.log('createAnswer', desc);
+          pc.setLocalDescription(desc, function () {
+            console.log('setLocalDescription', pc.localDescription);
+            socket.emit('exchange', {'to': fromId, 'sdp': pc.localDescription });
+          }, logError);
+        }, logError);
+    }, logError);
+  } else {
+    console.log('exchange candidate', data);
+    pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+  }
+}
+function leave(socketId) {
+  console.log('leave', socketId);
+  var pc = pcPeers[socketId];
+  if (pc != null)  pc.close();
+  delete pcPeers[socketId];
+  var video = document.getElementById("remoteView" + socketId);
+  if (video) video.remove();
+}
+socket.on('exchange', function(data){
+  exchange(data);
+});
+socket.on('leave', function(socketId){
+  leave(socketId);
+});
+socket.on('connect', function(data) {
+  console.log('connect');
+  getLocalStream();
+});
+function logError(error) {
+  console.log("logError", error);
+}
+function press() {
+  var roomID = document.getElementById('roomID').value;
+  if (roomID == "") {
+    alert('Please enter room ID');
+  } else {
+    var roomIDContainer = document.getElementById('roomIDContainer');
+    roomIDContainer.parentElement.removeChild(roomIDContainer);
+    join(roomID);
+  }
+}
+function textRoomPress() {
+  var text = document.getElementById('textRoomInput').value;
+  if (text == "") {
+    alert('Enter something');
+  } else {
+    document.getElementById('textRoomInput').value = '';
+    var content = document.getElementById('textRoomContent');
+    content.scrollTop = content.scrollHeight;
+    content.value = content.value  + 'Me' + ': ' + text + '\n';
+    for (var key in pcPeers) {
+      var pc = pcPeers[key];
+      pc.textDataChannel.send(text);
+    }
   }
 }

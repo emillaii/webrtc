@@ -1,36 +1,53 @@
 <!DOCTYPE html>
 <html>
-
 <head>
-
-  <title>Realtime communication with WebRTC</title>
-
-  <link rel="stylesheet" href="css/main.css" />
-  <link rel="stylesheet" href="css/bootstrap.min.css"/>
-
+    <title>react-native-webrtc server</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <link rel="stylesheet" href="css/main.css" />
+    <link rel="stylesheet" href="css/bootstrap.min.css"/>
 </head>
-
 <body>
-  <div class="jumbotron">
-    <div class="container">
-      <h1>Realtime communication with WebRTC</h1>
+    <div class="container theme-showcase" role="main">
+        <div class="jumbotron">
+            <h2>Realtime communication with WebRTC</h2>
+        </div>
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-sm-3 col-md-2 sidenav">
+                    <h3 id="currentUsername">Welcome! </h3>
+                    <ul id="user_list" class="nav nav-pills nav-stacked"></ul>
+                    </br></br></br></br></br></br></br></br></br></br></br></br></br>
+                    <div id="username" class="small_id">aa@gmail.com</div>
+                    <div id="userid" class="small_id">58a8f213ce1c360a022ece54</div>
+                </div>
+                <div class="col-sm-9 col-md-10 main">
+                    <h1 id="roomName">Chat Room</h1>
+                    <video id="selfView" autoplay></video>
+                    <row>
+                        <div id="remoteViewContainer"></div>
+                    </row>
 
-      <video id="localVideo" autoplay></video>
-      <video id="remoteVideo" autoplay></video>
+                    <div id="textRoom" style="display: none;" class="form-group">
+                        <input id="textRoomInput" class="form-control">
+                        <button onclick="textRoomPress();" class="btn btn-lg btn-primary btn-block">Send</button>
+                        <textarea class="form-control" rows="5" id="textRoomContent" disabled></textarea>
+                    </div>
 
-      <div>
-        <button id="startButton" class="btn btn-lg btn-primary">Start</button>
-        <button id="callButton" class="btn btn-lg btn-primary">Call</button>
-        <button id="hangupButton" class="btn btn-lg btn-primary">Hang Up</button>
-      </div>
+                    <div id="roomIDContainer" class="form-group">
+                        <label>Room ID:</label>
+                        <input id="roomID" value="abc" class="form-control">
+                        <button onclick="press(); " class="btn btn-lg btn-primary btn-block">Join/Create room</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-  </div>
-
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
-  <script src="js/main.js"></script>
-  <script src="js/lib/adapter.js"></script>
-  <script src="js/lib/bootstrap.min.js"></script>
 
 </body>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+<script src="js/lib/adapter.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="js/main.js"></script>
+<script src="js/lib/bootstrap.min.js"></script>
 
 </html>
