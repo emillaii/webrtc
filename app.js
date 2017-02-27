@@ -9,67 +9,58 @@ var fs = require('fs');
 
 var socketId2UsernameMap = [];
 var options = {
-    key: fs.readFileSync('key/server.key'),
-    cert: fs.readFileSync('key/server.crt')
+//    key: fs.readFileSync('key/server.key'),
+//    cert: fs.readFileSync('key/server.crt')
 };
 
+const serverPort = process.argv[2]; 
+
+
 var fileServer = new(nodeStatic.Server)();
-var app = https.createServer(options, function(req, res) {
+var app = http.createServer(function(req, res) {
   fileServer.serve(req, res);
-}).listen(8080);
+}).listen(serverPort);
 
 var io = socketIO.listen(app);
 
+//Create a Redis Client 
+var redis = require('socket.io-redis'); 
+const redisPort = process.argv[3]; 
+io.adapter(redis({ host: '127.0.0.1', port: redisPort })); 
+
 function socketIdsInRoom(name) {
-  var socketIds = io.nsps['/'].adapter.rooms[name];
-  if (socketIds) {
-    var collection = [];
-    for (var key in socketIds) {
-      collection.push(key);
-    }
-    return collection;
-  } else {
-    return [];
+  var clients = io.of('/').adapter.clients([name]);
+  console.log(clients);
+  var collection = []; 
+  for (var key in clients) {
+      console.log(clients[key]); 
+      collection.push(clients[key]);
   }
+  return collection; 
 }
 
-io.on('connection', function(socket){
-  console.log('connection');
-  socket.on('disconnect', function(){
-    console.log('disconnect socket id: ', socket.id);
-    if (socket.room) {
-      var room = socket.room;
-      io.to(room).emit('leave', socket.id);
-      socket.leave(room);
-      if (socketId2UsernameMap[socket.id] != null) {delete socketId2UsernameMap[socket.id];}
-    }
-  });
+io.sockets.on('connection', function (socket) {
+   console.log('connection');
+   socket.on('join', function(data, callback){
+       console.log('join', data);
+       //var socketIds = socketIdsInRoom(data.roomID);
+       io.of('/').adapter.clients([data.roomID], function(err, clients) {
+          var collection = []; 
+	  for (var key in clients) {
+	  	console.log(clients[key]); 
+		collection.push(clients[key]); 
+	  }
+	  callback(collection); 
+	  socket.join(data.roomID); 
+       }); 
+   });
 
-  socket.on('join', function(data, callback){
-    console.log('join', data);
-    var socketIds = socketIdsInRoom(data.roomID);
-    callback(socketIds);
-    socket.join(data.roomID);
-    socket.room = data.roomID;
-    //This socket-user name is not really scalable if the user is up to million.
-    socketId2UsernameMap[data.from] = data.userName;
-    for (var i in socketId2UsernameMap) {
-        console.log('Current active user: ' + i);
-    }
-  });
-
-  socket.on('joined', function(data){
-    console.log('joined', data);
-    socketId2UsernameMap[data.from] = data.userName;
-    for (var i in socketId2UsernameMap) {
-        console.log('Current active user: ' + i);
-    }
-  });
-
-  socket.on('exchange', function(data){
-    //console.log('exchange', data);
-    data.from = socket.id;
-    var to = io.sockets.connected[data.to];
-    to.emit('exchange', data);
-  });
+    socket.on('exchange', function(data){
+        var room = 'abc'; 
+        console.log('exchange to ', socket.id);
+	data.from = socket.id;
+	//var to = io.sockets.connected[data.to];
+	io.to(room).emit('exchange', data);
+    });
 });
+
